@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>🎈 မီးပုံးပျံ ပူးပေါင်းလွှတ်တင်မည် (Roblox Style Co-op 3D)</title>
+    <title>🎈 မီးပုံးပျံ ပူးပေါင်းလွှတ်တင်မည် (Multiplayer Synced World)</title>
     <!-- Tailwind CSS for UI styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -102,11 +102,11 @@
         </div>
     </div>
 
-    <!-- Top-Center UI: Timer & Station Total Progress -->
+    <!-- Top-Center UI: Synchronized Global Timer & Station Total Progress -->
     <div class="fixed top-4 left-1/2 transform -translate-x-1/2 z-20 pointer-events-none">
         <div class="glass-panel px-5 py-2 rounded-2xl flex items-center space-x-4 pointer-events-auto border border-sky-500/30 shadow-lg">
             <div class="text-center">
-                <span class="text-[9px] text-gray-400 font-bold uppercase tracking-wider block">အချိန်</span>
+                <span class="text-[9px] text-gray-400 font-bold uppercase tracking-wider block">အချိန် (Global Sync)</span>
                 <span id="ui-timer" class="text-sm sm:text-base font-black text-sky-400 glow-text-cyan">60:00</span>
             </div>
             <div class="h-6 w-[1px] bg-white/10"></div>
@@ -188,7 +188,7 @@
         </div>
     </div>
 
-    <!-- Mobile Controls & Spells Floating Panel (Right Bottom Easy Reach) -->
+    <!-- Mobile Controls & Spells Floating Panel -->
     <div class="fixed bottom-6 right-6 z-30 flex flex-col items-end space-y-2.5 pointer-events-auto">
         <!-- Speed Spell Button -->
         <button id="btn-use-speed" onclick="useSpeedFromInventory()" class="w-13 h-13 rounded-full bg-cyan-600/90 border-2 border-cyan-300 text-white flex flex-col items-center justify-center shadow-lg active:scale-90 active:bg-cyan-700 transition-all cursor-pointer" title="အမြန်နှုန်းမြှင့်မည်">
@@ -314,78 +314,116 @@
             }
         });
 
-        // Real-time Global Leaderboard & Active Lobby Players
-        try {
-            onSnapshot(collection(db, 'artifacts', appId, 'users'), (snapshot) => {
-                let playersList = [];
-                let loadedCount = 0;
-                const docs = snapshot.docs;
-                
-                if (docs.length === 0) return;
-
-                docs.forEach(async (userDocSnap) => {
-                    const uid = userDocSnap.id;
-                    try {
-                        const profileSnap = await getDoc(doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data'));
-                        if (profileSnap.exists()) {
-                            const pData = profileSnap.data();
-                            if (pData && pData.displayName) {
-                                playersList.push(pData);
-                            }
-                        }
-                    } catch (e) {
-                        console.log(e);
-                    }
-                    loadedCount++;
-
-                    if (loadedCount === docs.length) {
-                        // Render Active Lobby Players List
-                        let activeListContainer = document.getElementById('active-players-list');
-                        if (activeListContainer) {
-                            activeListContainer.innerHTML = '';
-                            if (playersList.length === 0) {
-                                activeListContainer.innerHTML = `<div class="text-gray-400 text-center py-1 text-[10px]">သူငယ်ချင်း မရှိသေးပါ</div>`;
-                            } else {
-                                playersList.forEach((p, index) => {
-                                    const item = document.createElement('div');
-                                    item.className = 'flex justify-between items-center border-b border-white/5 pb-0.5';
-                                    item.innerHTML = `<span class="truncate w-28 text-[11px]">🟢 ${p.displayName || 'Player'}</span> <span class="text-[9px] text-amber-400">⚡ လှုပ်ရှားနေသည်</span>`;
-                                    activeListContainer.appendChild(item);
-                                });
-                            }
-                        }
-
-                        // Render Top Points List
-                        let ptsListContainer = document.getElementById('live-points-list');
-                        if (ptsListContainer) {
-                            let sortedByPts = [...playersList].sort((a, b) => (b.points || 0) - (a.points || 0));
-                            ptsListContainer.innerHTML = '';
-                            sortedByPts.slice(0, 3).forEach((p, index) => {
-                                const item = document.createElement('div');
-                                item.className = 'flex justify-between border-b border-white/5 pb-0.5';
-                                item.innerHTML = `<span class="truncate w-32">${index + 1}. ${p.displayName || 'Player'}</span> <span class="text-amber-400 font-bold">${p.points || 0}</span>`;
-                                ptsListContainer.appendChild(item);
-                            });
-                        }
-
-                        // Render Most Balloons Launched List
-                        let balloonsListContainer = document.getElementById('live-balloons-list');
-                        if (balloonsListContainer) {
-                            let sortedByBalloons = [...playersList].sort((a, b) => (b.balloonsLaunched || 0) - (a.balloonsLaunched || 0));
-                            balloonsListContainer.innerHTML = '';
-                            sortedByBalloons.slice(0, 3).forEach((p, index) => {
-                                const item = document.createElement('div');
-                                item.className = 'flex justify-between border-b border-white/5 pb-0.5';
-                                item.innerHTML = `<span class="truncate w-32">${index + 1}. ${p.displayName || 'Player'}</span> <span class="text-cyan-400 font-bold">🎈 ${p.balloonsLaunched || 0}</span>`;
-                                balloonsListContainer.appendChild(item);
-                            });
-                        }
-                    }
-                });
-            });
-        } catch (err) {
-            console.log("Leaderboard listener note:", err);
+        // --- GLOBAL SYNCHRONIZED TIMER & GAME STATE SYNC ---
+        const lobbyTimerRef = doc(db, 'artifacts', appId, 'world', 'gameState');
+        
+        async function initGlobalGameSession() {
+            try {
+                const snap = await getDoc(lobbyTimerRef);
+                if (!snap.exists()) {
+                    // ပထမဆုံး ဝင်လာသူက Server Start Time ကို သတ်မှတ်မည် (ဥပမာ - ၁ နာရီပွဲ)
+                    await setDoc(lobbyTimerRef, {
+                        startTime: Date.now(),
+                        duration: 3600 // 60 mins
+                    });
+                }
+            } catch (e) {
+                console.log(e);
+            }
         }
+        initGlobalGameSession();
+
+        // Listen to Global Timer
+        onSnapshot(lobbyTimerRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                const elapsedSecs = Math.floor((Date.now() - data.startTime) / 1000);
+                let remaining = Math.max(0, data.duration - elapsedSecs);
+                const mins = Math.floor(remaining / 60).toString().padStart(2, '0');
+                const secs = (remaining % 60).toString().padStart(2, '0');
+                const timerEl = document.getElementById('ui-timer');
+                if (timerEl) timerEl.innerText = `${mins}:${secs}`;
+            }
+        });
+
+        // Real-time Global Leaderboard, Active Players & Remote Avatars Sync
+        window.remotePlayers = {};
+
+        onSnapshot(collection(db, 'artifacts', appId, 'users'), (snapshot) => {
+            let playersList = [];
+            let loadedCount = 0;
+            const docs = snapshot.docs;
+            
+            if (docs.length === 0) return;
+
+            docs.forEach(async (userDocSnap) => {
+                const uid = userDocSnap.id;
+                try {
+                    const profileSnap = await getDoc(doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data'));
+                    if (profileSnap.exists()) {
+                        const pData = profileSnap.data();
+                        if (pData && pData.displayName) {
+                            playersList.push(pData);
+                        }
+                    }
+
+                    // Sync Remote Player Positions
+                    if (!currentUser || uid !== currentUser.uid) {
+                        const posSnap = await getDoc(doc(db, 'artifacts', appId, 'users', uid, 'position', 'live'));
+                        if (posSnap.exists()) {
+                            const pPos = posSnap.data();
+                            if (!window.remotePlayers[uid] && window.createRemoteAvatar) {
+                                window.remotePlayers[uid] = window.createRemoteAvatar(pPos.displayName || 'Player');
+                            }
+                            if (window.remotePlayers[uid]) {
+                                window.remotePlayers[uid].position.set(pPos.x || 0, pPos.y || 0, pPos.z || 0);
+                                window.remotePlayers[uid].rotation.y = pPos.rotationY || 0;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.log(e);
+                }
+                loadedCount++;
+
+                if (loadedCount === docs.length) {
+                    let activeListContainer = document.getElementById('active-players-list');
+                    if (activeListContainer) {
+                        activeListContainer.innerHTML = '';
+                        playersList.forEach((p) => {
+                            const item = document.createElement('div');
+                            item.className = 'flex justify-between items-center border-b border-white/5 pb-0.5';
+                            item.innerHTML = `<span class="truncate w-28 text-[11px]">🟢 ${p.displayName || 'Player'}</span> <span class="text-[9px] text-amber-400">⚡ Online</span>`;
+                            activeListContainer.appendChild(item);
+                        });
+                    }
+
+                    let ptsListContainer = document.getElementById('live-points-list');
+                    if (ptsListContainer) {
+                        let sortedByPts = [...playersList].sort((a, b) => (b.points || 0) - (a.points || 0));
+                        ptsListContainer.innerHTML = '';
+                        sortedByPts.slice(0, 3).forEach((p, index) => {
+                            const item = document.createElement('div');
+                            item.className = 'flex justify-between border-b border-white/5 pb-0.5';
+                            item.innerHTML = `<span class="truncate w-32">${index + 1}. ${p.displayName || 'Player'}</span> <span class="text-amber-400 font-bold">${p.points || 0}</span>`;
+                            ptsListContainer.appendChild(item);
+                        });
+                    }
+
+                    let balloonsListContainer = document.getElementById('live-balloons-list');
+                    if (balloonsListContainer) {
+                        let sortedByBalloons = [...playersList].sort((a, b) => (b.balloonsLaunched || 0) - (a.balloonsLaunched || 0));
+                        balloonsListContainer.innerHTML = '';
+                        sortedByBalloons.slice(0, 3).forEach((p, index) => {
+                            const item = document.createElement('div');
+                            item.className = 'flex justify-between border-b border-white/5 pb-0.5';
+                            item.innerHTML = `<span class="truncate w-32">${index + 1}. ${p.displayName || 'Player'}</span> <span class="text-cyan-400 font-bold">🎈 ${p.balloonsLaunched || 0}</span>`;
+                            balloonsListContainer.appendChild(item);
+                        });
+                    }
+                }
+            });
+        });
 
         window.syncStatsToFirebase = async function() {
             if (!currentUser) return;
@@ -402,6 +440,20 @@
                 }, { merge: true });
             } catch (err) {
                 console.error("Firestore sync error:", err);
+            }
+        };
+
+        window.syncPlayerPositionToFirebase = async function(x, y, z, rotY) {
+            if (!currentUser) return;
+            try {
+                const posRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'position', 'live');
+                await setDoc(posRef, {
+                    displayName: window.userNickname || 'Player',
+                    x: x, y: y, z: z, rotationY: rotY,
+                    updatedAt: Date.now()
+                }, { merge: true });
+            } catch (err) {
+                console.log(err);
             }
         };
     </script>
@@ -448,9 +500,8 @@
                 osc.start();
                 osc.stop(audioCtx.currentTime + 0.15);
             } else if (type === 'celebrate') {
-                // Festive Fanfare Sound Effect (Success Chime)
                 const now = audioCtx.currentTime;
-                const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+                const notes = [523.25, 659.25, 783.99, 1046.50];
                 notes.forEach((freq, idx) => {
                     const subOsc = audioCtx.createOscillator();
                     const subGain = audioCtx.createGain();
@@ -475,9 +526,7 @@
         
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         renderer.shadowMap.enabled = !isMobile;
-        if (!isMobile) {
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        }
+        if (!isMobile) renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.2;
         document.body.appendChild(renderer.domElement);
@@ -499,7 +548,7 @@
         const hemiLight = new THREE.HemisphereLight(0x0f172a, 0x020617, 0.4);
         scene.add(hemiLight);
 
-        // --- 2x EXPANDED MAP DIMENSIONS ---
+        // --- MAP & TERRAIN ---
         const mapSize = 440;
         const terrainSegments = 160;
         const terrainGeo = new THREE.PlaneGeometry(mapSize, mapSize, terrainSegments, terrainSegments);
@@ -510,9 +559,7 @@
             h += Math.sin(x * 0.035 + 1.2) * Math.cos(z * 0.03 + 0.5) * 8.0;
             h += Math.cos(x * 0.01) * Math.sin(z * 0.0125) * 18.0;
             const distFromCenter = Math.hypot(x, z);
-            if (distFromCenter < 35) {
-                h *= (distFromCenter / 35);
-            }
+            if (distFromCenter < 35) h *= (distFromCenter / 35);
             return h;
         }
 
@@ -541,7 +588,7 @@
         terrain.receiveShadow = true;
         scene.add(terrain);
 
-        // --- ENVIRONMENT, HOUSES, TREES & MOUNTAINS ---
+        // --- ENVIRONMENT (TREES, ROCKS, HOUSES) ---
         const envGroup = new THREE.Group();
         scene.add(envGroup);
         const obstacles = [];
@@ -573,92 +620,13 @@
             return treeGroup;
         }
 
-        function createRock(x, z) {
-            const y = getTerrainHeight(x, z);
-            const rock = new THREE.Mesh(
-                new THREE.DodecahedronGeometry(0.6 + Math.random() * 0.6, 0),
-                new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.9 })
-            );
-            rock.position.set(x, y + 0.3, z);
-            rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
-            rock.castShadow = true;
-            rock.receiveShadow = true;
-            return rock;
-        }
-
         for (let i = 0; i < 250; i++) {
             const rx = (Math.random() - 0.5) * 360;
             const rz = (Math.random() - 0.5) * 360;
             if (Math.hypot(rx, rz) > 25) {
-                if (Math.random() > 0.3) {
-                    envGroup.add(createTree(rx, rz));
-                    obstacles.push({ x: rx, z: rz, radius: 1.2 });
-                } else {
-                    envGroup.add(createRock(rx, rz));
-                    obstacles.push({ x: rx, z: rz, radius: 1.0 });
-                }
+                envGroup.add(createTree(rx, rz));
+                obstacles.push({ x: rx, z: rz, radius: 1.2 });
             }
-        }
-
-        function createVillageHouse(x, z, angle) {
-            const houseGroup = new THREE.Group();
-            const y = getTerrainHeight(x, z);
-            const wallMat = new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.8 });
-            const walls = new THREE.Mesh(new THREE.BoxGeometry(2.8, 2.2, 2.8), wallMat);
-            walls.position.y = 1.1;
-            walls.castShadow = true;
-            walls.receiveShadow = true;
-            houseGroup.add(walls);
-
-            const roofMat = new THREE.MeshStandardMaterial({ color: 0xb71c1c, roughness: 0.6 });
-            const roof = new THREE.Mesh(new THREE.ConeGeometry(2.4, 1.5, 4), roofMat);
-            roof.position.y = 2.95;
-            roof.rotation.y = Math.PI / 4;
-            roof.castShadow = true;
-            houseGroup.add(roof);
-
-            const windowMat = new THREE.MeshStandardMaterial({ color: 0xffeb3b, emissive: 0xffc107, emissiveIntensity: 1.0 });
-            const win = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.1), windowMat);
-            win.position.set(0, 1.2, 1.41);
-            houseGroup.add(win);
-
-            const winLight = new THREE.PointLight(0xffc107, 1.2, 6);
-            winLight.position.set(0, 1.2, 1.6);
-            houseGroup.add(winLight);
-
-            houseGroup.position.set(x, y, z);
-            houseGroup.rotation.y = angle;
-            envGroup.add(houseGroup);
-            obstacles.push({ x: x, z: z, radius: 1.8 });
-        }
-
-        for(let i = 0; i < 16; i++) {
-            let hx = (Math.random() - 0.5) * 300;
-            let hz = (Math.random() - 0.5) * 300;
-            if (Math.hypot(hx, hz) > 30) {
-                createVillageHouse(hx, hz, Math.random() * Math.PI * 2);
-            }
-        }
-
-        const mountainGeo = new THREE.DodecahedronGeometry(16, 1);
-        const mountainMat = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.95, metalness: 0.1 });
-        const mapBoundRadius = 200;
-        
-        for (let a = 0; a < Math.PI * 2; a += 0.035) {
-            const mx = Math.cos(a) * mapBoundRadius;
-            const mz = Math.sin(a) * mapBoundRadius;
-            const my = getTerrainHeight(mx, mz);
-            
-            const mountain = new THREE.Mesh(mountainGeo, mountainMat);
-            mountain.position.set(mx, my + 6, mz);
-            const scaleY = 3.0 + Math.random() * 2.0;
-            const scaleXZ = 2.0 + Math.random() * 1.2;
-            mountain.scale.set(scaleXZ, scaleY, scaleXZ);
-            mountain.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
-            mountain.castShadow = true;
-            mountain.receiveShadow = true;
-            envGroup.add(mountain);
-            obstacles.push({ x: mx, z: mz, radius: 14.0 });
         }
 
         // --- 10 HOT AIR BALLOONS ---
@@ -740,7 +708,7 @@
             });
         });
 
-        // --- PLAYER CHARACTER WITH FLASHLIGHT ---
+        // --- PLAYER CHARACTER ---
         function createPlayerCharacter() {
             const pGroup = new THREE.Group();
             const head = new THREE.Mesh(
@@ -771,7 +739,28 @@
         const player = playerObj.group;
         scene.add(player);
 
-        // --- CONTROLS & SPELLS SYSTEM ---
+        // Remote Player Avatar Factory
+        window.createRemoteAvatar = function(name) {
+            const rGroup = new THREE.Group();
+            const rHead = new THREE.Mesh(
+                new THREE.SphereGeometry(0.45, 16, 16),
+                new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.4 })
+            );
+            rHead.position.y = 1.95;
+            rGroup.add(rHead);
+
+            const rBody = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.4, 0.35, 1.0, 12),
+                new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.5 })
+            );
+            rBody.position.y = 1.1;
+            rGroup.add(rBody);
+
+            scene.add(rGroup);
+            return rGroup;
+        };
+
+        // --- CONTROLS & SPELLS ---
         let cameraDistance = 10, cameraPitch = 0.3, cameraYaw = 0;
         let isMouseDown = false, previousMouseX = 0, previousMouseY = 0;
 
@@ -788,7 +777,6 @@
         window.useSpeedFromInventory = function() {
             if (isSpeedActive) return alert("အမြန်နှုန်းမြှင့်ထားပြီးဖြစ်ပါသည်!");
             if (window.speedInventory <= 0) return alert("Speed Spell လက်ကျန်မရှိပါ!");
-
             window.speedInventory -= 1;
             isSpeedActive = true;
             speedTimer = 20;
@@ -799,7 +787,6 @@
         window.useMagnetFromInventory = function() {
             if (isMagnetActive) return alert("သံလိုက်ဖွင့်ထားပြီးဖြစ်ပါသည်!");
             if (window.magnetInventory <= 0) return alert("သံလိုက် လက်ကျန်မရှိပါ!");
-
             window.magnetInventory -= 1;
             isMagnetActive = true;
             magnetTimer = 120;
@@ -810,7 +797,6 @@
         window.useRevealFromInventory = function() {
             if (isRevealActive) return alert("နေရာပြဖွင့်ထားပြီးဖြစ်ပါသည်!");
             if (window.revealInventory <= 0) return alert("နေရာပြ လက်ကျန်မရှိပါ!");
-
             window.revealInventory -= 1;
             isRevealActive = true;
             revealTimer = 15;
@@ -825,24 +811,13 @@
             if (mCount) mCount.innerText = window.magnetInventory || 0;
             if (rCount) rCount.innerText = window.revealInventory || 0;
             if (sCount) sCount.innerText = window.speedInventory || 0;
-            if (window.syncStatsToFirebase) {
-                window.syncStatsToFirebase();
-            }
+            if (window.syncStatsToFirebase) window.syncStatsToFirebase();
         }
 
         setInterval(() => {
-            if (isMagnetActive && magnetTimer > 0) {
-                magnetTimer--;
-                if (magnetTimer <= 0) isMagnetActive = false;
-            }
-            if (isRevealActive && revealTimer > 0) {
-                revealTimer--;
-                if (revealTimer <= 0) isRevealActive = false;
-            }
-            if (isSpeedActive && speedTimer > 0) {
-                speedTimer--;
-                if (speedTimer <= 0) isSpeedActive = false;
-            }
+            if (isMagnetActive && magnetTimer > 0) magnetTimer--;
+            if (isRevealActive && revealTimer > 0) revealTimer--;
+            if (isSpeedActive && speedTimer > 0) speedTimer--;
         }, 1000);
 
         window.addEventListener('mousedown', (e) => {
@@ -927,7 +902,6 @@
         const greenGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.6, 12);
         const greenMat = new THREE.MeshStandardMaterial({ color: 0x10b981, emissive: 0x059669, emissiveIntensity: 0.4, roughness: 0.2, metalness: 0.3 });
         const goldMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xd97706, emissiveIntensity: 0.6, roughness: 0.2, metalness: 0.5 });
-        
         const starGeo = new THREE.OctahedronGeometry(0.4, 0);
         const starMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xf59e0b, emissiveIntensity: 0.9, roughness: 0.1, metalness: 0.8 });
 
@@ -952,13 +926,11 @@
             const b1 = document.getElementById('fuel-bar-1');
             const b2 = document.getElementById('fuel-bar-2');
             const b3 = document.getElementById('fuel-bar-3');
-
             if (!b1 || !b2 || !b3) return;
 
             [b1, b2, b3].forEach(b => {
                 b.className = "w-3 h-4.5 rounded-sm bg-slate-800 border border-white/20 transition-all";
             });
-
             if (carried >= 1) b1.className = "w-3 h-4.5 rounded-sm bg-emerald-400 border border-emerald-200 shadow-[0_0_6px_#34d399] transition-all";
             if (carried >= 2) b2.className = "w-3 h-4.5 rounded-sm bg-emerald-400 border border-emerald-200 shadow-[0_0_6px_#34d399] transition-all";
             if (carried >= 3) b3.className = "w-3 h-4.5 rounded-sm bg-amber-400 border border-amber-200 shadow-[0_0_6px_#fbbf24] transition-all";
@@ -973,9 +945,7 @@
         function addLeaderboardPoints(pts) {
             window.leaderboardPoints = (window.leaderboardPoints || 0) + pts;
             window.updateLeaderboardUI();
-            if (window.syncStatsToFirebase) {
-                window.syncStatsToFirebase();
-            }
+            if (window.syncStatsToFirebase) window.syncStatsToFirebase();
         }
 
         const particleGroup = new THREE.Group();
@@ -1036,25 +1006,14 @@
                 const pName = window.userNickname || "ကစားသမား";
                 nameEl.innerHTML = `<span class="text-amber-300">${pName}</span> မှ <span class="text-cyan-300">${balloonName}</span> လွှတ်တင်လိုက်ပါပြီ!`;
                 banner.classList.remove('hidden');
-                playSound('celebrate'); // Trigger celebrate fanfare sound effect here
+                playSound('celebrate');
                 setTimeout(() => { banner.classList.add('hidden'); }, 4500);
             }
         }
 
         const uiBalloonsCount = document.getElementById('ui-balloons-count');
-
-        let timeRemaining = 3600;
-        setInterval(() => {
-            if (!gameActive) return;
-            if (timeRemaining > 0) {
-                timeRemaining--;
-                const mins = Math.floor(timeRemaining / 60).toString().padStart(2, '0');
-                const secs = (timeRemaining % 60).toString().padStart(2, '0');
-                document.getElementById('ui-timer').innerText = `${mins}:${secs}`;
-            }
-        }, 1000);
-
         const clock = new THREE.Clock();
+        let lastSyncTime = 0;
 
         function animate() {
             requestAnimationFrame(animate);
@@ -1107,9 +1066,7 @@
                 player.rotation.y += diff * 0.15;
             }
 
-            if (isGrounded) {
-                player.position.y = terrainY;
-            }
+            if (isGrounded) player.position.y = terrainY;
 
             playerVelocityY -= 0.015;
             player.position.y += playerVelocityY;
@@ -1123,6 +1080,14 @@
             const maxWorldLimit = 190;
             player.position.x = Math.max(-maxWorldLimit, Math.min(maxWorldLimit, player.position.x));
             player.position.z = Math.max(-maxWorldLimit, Math.min(maxWorldLimit, player.position.z));
+
+            // Sync Player Position to Firebase every 100ms
+            if (elapsedTime - lastSyncTime > 0.1) {
+                lastSyncTime = elapsedTime;
+                if (window.syncPlayerPositionToFirebase) {
+                    window.syncPlayerPositionToFirebase(player.position.x, player.position.y, player.position.z, player.rotation.y);
+                }
+            }
 
             camera.position.x = player.position.x + cameraDistance * Math.sin(cameraYaw) * Math.cos(cameraPitch);
             camera.position.z = player.position.z + cameraDistance * Math.cos(cameraYaw) * Math.cos(cameraPitch);
@@ -1160,18 +1125,13 @@
 
                         window.balloonsLaunchedCount = (window.balloonsLaunchedCount || 0) + 1;
                         addLeaderboardPoints(100);
-                        if (window.syncStatsToFirebase) {
-                            window.syncStatsToFirebase();
-                        }
-
+                        if (window.syncStatsToFirebase) window.syncStatsToFirebase();
                         showLaunchAnnouncement(b.name);
 
-                        const starsToDrop = 400; 
-                        for(let s = 0; s < starsToDrop; s++) {
+                        for(let s = 0; s < 400; s++) {
                             setTimeout(() => {
                                 const rx = (Math.random() - 0.5) * 320;
                                 const rz = (Math.random() - 0.5) * 320;
-                                
                                 const starMesh = new THREE.Mesh(starGeo, starMat);
                                 starMesh.userData = { pointsValue: 1 };
                                 starMesh.position.set(rx, getTerrainHeight(rx, rz) + 0.7, rz);
@@ -1204,12 +1164,11 @@
 
             // Collect Reward Stars & Magnet Pull
             for (let i = rewardStarItems.length - 1; i >= 0; i--) {
-                const star = rewardStarItems.push ? rewardStarItems[i] : rewardStarItems[i];
+                const star = rewardStarItems[i];
                 star.rotation.y += 0.08;
                 star.rotation.x += 0.04;
 
                 const dist = player.position.distanceTo(star.position);
-
                 if (isMagnetActive && dist < MAGNET_RADIUS) {
                     const pullDir = new THREE.Vector3().subVectors(player.position, star.position).normalize();
                     star.position.addScaledVector(pullDir, MAGNET_SPEED);
